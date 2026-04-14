@@ -7,6 +7,7 @@
 # ///
 
 import hashlib
+import stat
 import sys
 import zipfile
 from base64 import urlsafe_b64encode
@@ -56,8 +57,10 @@ def download_asset(version: str, target: str) -> bytes:
     return resp.content
 
 
-_EXEC_ATTR = 0o100755 << 16
-_FILE_ATTR = 0o100644 << 16
+_EXEC_ATTR = (
+    stat.S_IFREG | stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
+) << 16
+_FILE_ATTR = (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH) << 16
 
 
 def build_wheel(
@@ -68,6 +71,9 @@ def build_wheel(
     dist_dir: Path,
 ) -> Path:
     """Build a single platform wheel."""
+    data_scripts_dir = f"{DIST_NAME}-{version}.data/scripts"
+    dist_info_dir = f"{DIST_NAME}-{version}.dist-info"
+
     # Collect wheel entries: (arcname, data_bytes, is_executable)
     entries: list[tuple[str, bytes, bool]] = []
 
@@ -77,11 +83,8 @@ def build_wheel(
         (f"{IMPORT_NAME}/__init__.py", init_py.read_bytes(), False)
     )
 
-    # Add the binary
-    entries.append((f"{IMPORT_NAME}/{binary_name}", binary_data, True))
-
-    # dist-info directory
-    dist_info_dir = f"{DIST_NAME}-{version}.dist-info"
+    # Native binary goes in data/scripts/ — pip copies it directly to bin/Scripts
+    entries.append((f"{data_scripts_dir}/{binary_name}", binary_data, True))
 
     readme_path = Path(__file__).resolve().parent.parent / "README.md"
     readme_text = readme_path.read_text(encoding="utf-8")
@@ -108,10 +111,7 @@ def build_wheel(
     )
     entries.append((f"{dist_info_dir}/WHEEL", wheel_meta.encode(), False))
 
-    entry_points = f"[console_scripts]\nwash = {IMPORT_NAME}:main\n"
-    entries.append(
-        (f"{dist_info_dir}/entry_points.txt", entry_points.encode(), False)
-    )
+    # No entry_points.txt — binary is installed directly via data/scripts
 
     # Build RECORD
     records: list[str] = []
